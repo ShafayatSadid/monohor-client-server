@@ -17,6 +17,8 @@ router.get("/", async (req, res) => {
       featured,
       newArrival,
       bestSeller,
+      page,
+      limit,
     } = req.query;
 
     const query = {};
@@ -40,15 +42,41 @@ router.get("/", async (req, res) => {
       ];
     }
 
-    let sortOption = { createdAt: -1 }; // default: newest
+    let sortOption = { createdAt: -1 };
     if (sort === "price_asc") sortOption = { price: 1 };
     else if (sort === "price_desc") sortOption = { price: -1 };
     else if (sort === "popular") sortOption = { rating: -1 };
     else if (sort === "newest") sortOption = { createdAt: -1 };
 
     const collection = await getCollection("products");
-    const products = await collection.find(query).sort(sortOption).toArray();
 
+    // Pagination requested?
+    if (page || limit) {
+      const pageNum = Math.max(1, parseInt(page) || 1);
+      const limitNum = Math.min(48, Math.max(1, parseInt(limit) || 12));
+      const skip = (pageNum - 1) * limitNum;
+
+      const [products, total] = await Promise.all([
+        collection
+          .find(query)
+          .sort(sortOption)
+          .skip(skip)
+          .limit(limitNum)
+          .toArray(),
+        collection.countDocuments(query),
+      ]);
+
+      return res.send({
+        products,
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum) || 1,
+      });
+    }
+
+    // No pagination → return array (backward compatible)
+    const products = await collection.find(query).sort(sortOption).toArray();
     res.send(products);
   } catch (err) {
     console.error("GET /products error:", err);

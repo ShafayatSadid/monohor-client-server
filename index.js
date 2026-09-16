@@ -9,6 +9,7 @@ require("dotenv").config();
 const { connectDB } = require("./lib/db");
 const categoriesRouter = require("./routes/categories");
 const productsRouter = require("./routes/products");
+const ordersRouter = require("./routes/orders");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -24,6 +25,7 @@ app.get("/", (req, res) => {
 // Routes
 app.use("/categories", categoriesRouter);
 app.use("/products", productsRouter);
+app.use("/orders", ordersRouter);
 
 // Connect DB, তারপর listen
 connectDB()
