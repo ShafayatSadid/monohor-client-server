@@ -2,6 +2,7 @@
 const express = require("express");
 const { ObjectId } = require("mongodb");
 const { getCollection } = require("../lib/db");
+const { verifyToken, requireAdmin } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -40,7 +41,7 @@ router.get("/:slug", async (req, res) => {
 
 // POST /categories — নতুন ক্যাটাগরি
 // TODO: পরে requireAdmin middleware যোগ করবেন
-router.post("/", async (req, res) => {
+router.post("/", verifyToken, requireAdmin, async (req, res) => {
   try {
     const { name, slug, image, description } = req.body;
 
@@ -78,7 +79,7 @@ router.post("/", async (req, res) => {
 
 // PATCH /categories/:id — আপডেট
 // TODO: পরে requireAdmin middleware যোগ করবেন
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", verifyToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -130,7 +131,7 @@ router.patch("/:id", async (req, res) => {
 
 // DELETE /categories/:id
 // TODO: পরে requireAdmin middleware যোগ করবেন
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", verifyToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 

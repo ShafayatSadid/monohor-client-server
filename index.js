@@ -10,6 +10,7 @@ const { connectDB } = require("./lib/db");
 const categoriesRouter = require("./routes/categories");
 const productsRouter = require("./routes/products");
 const ordersRouter = require("./routes/orders");
+const adminRouter = require("./routes/admin")
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -26,6 +27,7 @@ app.get("/", (req, res) => {
 app.use("/categories", categoriesRouter);
 app.use("/products", productsRouter);
 app.use("/orders", ordersRouter);
+app.use("/admin", adminRouter);
 
 // Connect DB, তারপর listen
 connectDB()

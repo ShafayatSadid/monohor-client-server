@@ -5,8 +5,9 @@ const { getCollection } = require("../lib/db");
 const {
     getDeliveryCharge,
     generateOrderNumber,
-    DELIVERY_CHARGES,
 } = require("../lib/orderHelpers");
+const { verifyToken, requireAdmin } = require("../middleware/auth");
+const { createConsignment } = require("../lib/steadfast");
 
 const router = express.Router();
 
@@ -108,16 +109,8 @@ router.post("/", async (req, res) => {
             });
         }
 
-        // ─── 3. Delivery charge (server-calculated) ───
-        const zone = String(
-            customer.address.deliveryZone || "outside-dhaka"
-        );
-        if (!DELIVERY_CHARGES[zone]) {
-            return res.status(400).send({
-                message: "ডেলিভারি জোন সঠিক নয়",
-            });
-        }
-        const deliveryCharge = getDeliveryCharge(zone);
+        // ─── 3. Delivery charge (server-calculated, flat) ───
+        const deliveryCharge = getDeliveryCharge();
 
         // ─── 4. Total ───
         const total = subtotal + deliveryCharge;
@@ -140,7 +133,7 @@ router.post("/", async (req, res) => {
                     fullAddress: String(
                         customer.address.fullAddress || ""
                     ).trim(),
-                    deliveryZone: zone,
+                    
                 },
             },
             items: orderItems,
@@ -196,7 +189,7 @@ router.post("/", async (req, res) => {
 // GET /orders — List all orders (admin only — TODO middleware)
 // Query: ?status=pending&phone=017...&page=1&limit=20
 // ─────────────────────────────────────────────────────────────
-router.get("/", async (req, res) => {
+router.get("/", verifyToken, requireAdmin, async (req, res) => {
     try {
         const { status, phone, page, limit } = req.query;
 
@@ -290,7 +283,7 @@ router.get("/track/:orderNumber", async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 // GET /orders/:id — Single order (admin only — TODO middleware)
 // ─────────────────────────────────────────────────────────────
-router.get("/:id", async (req, res) => {
+router.get("/:id", verifyToken, requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         if (!ObjectId.isValid(id)) {
@@ -316,7 +309,7 @@ router.get("/:id", async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 // PATCH /orders/:id — Update status/note/steadfast (admin only)
 // ─────────────────────────────────────────────────────────────
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", verifyToken, requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         if (!ObjectId.isValid(id)) {
@@ -387,6 +380,86 @@ router.patch("/:id", async (req, res) => {
     }
 });
 
+// ─────────────────────────────────────────────────────────────
+// POST /orders/:id/send-steadfast — Admin: Steadfast-এ পাঠান
+// ─────────────────────────────────────────────────────────────
+router.post(
+    "/:id/send-steadfast",
+    verifyToken,
+    requireAdmin,
+    async (req, res) => {
+        try {
+            const { id } = req.params;
+            if (!ObjectId.isValid(id)) {
+                return res.status(400).send({ message: "Invalid id" });
+            }
+
+            const ordersCollection = await getCollection("orders");
+            const order = await ordersCollection.findOne({
+                _id: new ObjectId(id),
+            });
+
+            if (!order) {
+                return res.status(404).send({ message: "Order not found" });
+            }
+
+            // Duplicate protection
+            if (order.steadfast?.consignmentId) {
+                return res.status(409).send({
+                    message: "এই অর্ডার আগেই Steadfast-এ পাঠানো হয়েছে",
+                    steadfast: order.steadfast,
+                });
+            }
+
+            if (order.orderStatus === "cancelled") {
+                return res.status(400).send({
+                    message: "বাতিল অর্ডার Steadfast-এ পাঠানো যাবে না",
+                });
+            }
+
+            // Send to Steadfast
+            const result = await createConsignment(order);
+
+            if (!result.ok) {
+                return res.status(502).send({
+                    message:
+                        result.message ||
+                        "Steadfast-এ পাঠানো যায়নি",
+                });
+            }
+
+            const c = result.consignment;
+
+            const updateDoc = {
+                steadfast: {
+                    consignmentId: c.consignment_id,
+                    trackingCode: c.tracking_code,
+                    status: c.status || "in_review",
+                    sentAt: new Date(),
+                },
+                orderStatus: "shipped",
+                updatedAt: new Date(),
+            };
+
+            await ordersCollection.updateOne(
+                { _id: new ObjectId(id) },
+                { $set: updateDoc }
+            );
+
+            const updated = await ordersCollection.findOne({
+                _id: new ObjectId(id),
+            });
+
+            res.send({
+                message: "Steadfast-এ সফলভাবে পাঠানো হয়েছে",
+                order: updated,
+            });
+        } catch (err) {
+            console.error("POST /orders/:id/send-steadfast error:", err);
+            res.status(500).send({ message: "Server error" });
+        }
+    }
+);
 // ─────────────────────────────────────────────────────────────
 // GET /orders/config/delivery-zones — Frontend form-এর জন্য
 // ─────────────────────────────────────────────────────────────
