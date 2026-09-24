@@ -18,7 +18,7 @@ async function seed() {
     { name: "আতর", slug: "attar", image: "", description: "Authentic Bengali attar", createdAt: new Date() },
     { name: "বাখুর", slug: "bakhur", image: "", description: "Bakhoor wood and oud chips", createdAt: new Date() },
     { name: "শোপিস", slug: "showpiece", image: "", description: "Wooden craft and clay art", createdAt: new Date() },
-    { name: "হাতের কাজ", slug: "hater-kaj", image: "", description: "Handmade jewelry and nakshi kantha", createdAt: new Date() },
+    { name: "কুশিটাকার শিল্প", slug: "hater-kaj", image: "", description: "Handmade jewelry and nakshi kantha", createdAt: new Date() },
   ];
 
   await categoriesCollection.insertMany(categories);

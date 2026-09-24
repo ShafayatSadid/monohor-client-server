@@ -8,6 +8,7 @@ const {
 } = require("../lib/orderHelpers");
 const { verifyToken, requireAdmin } = require("../middleware/auth");
 const { createConsignment } = require("../lib/steadfast");
+const { sendOrderConfirmationEmail } = require("../lib/email");
 
 const router = express.Router();
 
@@ -316,8 +317,12 @@ router.patch("/:id", verifyToken, requireAdmin, async (req, res) => {
             return res.status(400).send({ message: "Invalid id" });
         }
 
-        const { orderStatus, paymentStatus, adminNote, steadfast } =
-            req.body || {};
+        const {
+            orderStatus,
+            paymentStatus,
+            adminNote,
+            steadfast,
+        } = req.body || {};
 
         const updateDoc = {};
 
@@ -361,19 +366,64 @@ router.patch("/:id", verifyToken, requireAdmin, async (req, res) => {
         updateDoc.updatedAt = new Date();
 
         const ordersCollection = await getCollection("orders");
-        const result = await ordersCollection.updateOne(
+
+        // ─── পুরোনো order state নিয়ে আসি (email trigger check-এর জন্য) ───
+        const existingOrder = await ordersCollection.findOne({
+            _id: new ObjectId(id),
+        });
+        if (!existingOrder) {
+            return res.status(404).send({ message: "Order not found" });
+        }
+
+        await ordersCollection.updateOne(
             { _id: new ObjectId(id) },
             { $set: updateDoc }
         );
 
-        if (result.matchedCount === 0) {
-            return res.status(404).send({ message: "Order not found" });
-        }
-
-        const updated = await ordersCollection.findOne({
+        let updated = await ordersCollection.findOne({
             _id: new ObjectId(id),
         });
-        res.send({ message: "Order updated", order: updated });
+
+        // ─── Email trigger logic ───
+        // শুধু প্রথমবার pending → confirmed হলে email পাঠাব
+        const isFirstConfirmation =
+            existingOrder.orderStatus !== "confirmed" &&
+            updateDoc.orderStatus === "confirmed" &&
+            !existingOrder.emailSent;
+
+        let emailResult = null;
+
+        if (isFirstConfirmation) {
+            if (updated.customer?.email) {
+                emailResult = await sendOrderConfirmationEmail(updated);
+
+                if (emailResult.ok) {
+                    await ordersCollection.updateOne(
+                        { _id: new ObjectId(id) },
+                        {
+                            $set: {
+                                emailSent: true,
+                                emailSentAt: new Date(),
+                            },
+                        }
+                    );
+                    updated = await ordersCollection.findOne({
+                        _id: new ObjectId(id),
+                    });
+                }
+            } else {
+                emailResult = {
+                    ok: false,
+                    message: "গ্রাহকের ইমেইল নেই",
+                };
+            }
+        }
+
+        res.send({
+            message: "Order updated",
+            order: updated,
+            emailResult,
+        });
     } catch (err) {
         console.error("PATCH /orders/:id error:", err);
         res.status(500).send({ message: "Server error" });
