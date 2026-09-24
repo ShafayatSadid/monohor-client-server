@@ -74,11 +74,12 @@ router.post("/", async (req, res) => {
         for (const item of items) {
             const slug = String(item?.slug || "").trim();
             const qty = Number(item?.qty);
+            const variantId = item?.variantId ? String(item.variantId).trim() : null;
 
             if (!slug || !Number.isInteger(qty) || qty < 1 || qty > 100) {
-                return res
-                    .status(400)
-                    .send({ message: "প্রতিটি পণ্যের তথ্য সঠিক নয়" });
+                return res.status(400).send({
+                    message: "প্রতিটি পণ্যের তথ্য সঠিক নয়",
+                });
             }
 
             const product = await productsCollection.findOne({ slug });
@@ -88,22 +89,48 @@ router.post("/", async (req, res) => {
                 });
             }
 
+            // ─── Variant handling ───
+            let effectivePrice = Number(product.price);
+            let variantSnapshot = null;
+
+            const productHasVariants =
+                Array.isArray(product.variants) && product.variants.length > 0;
+
+            if (productHasVariants) {
+                if (!variantId) {
+                    return res.status(400).send({
+                        message: `"${product.name}" এর জন্য সাইজ নির্বাচন করুন`,
+                    });
+                }
+                const variant = product.variants.find((v) => v.id === variantId);
+                if (!variant) {
+                    return res.status(400).send({
+                        message: `"${product.name}" এর নির্বাচিত সাইজ পাওয়া যায়নি`,
+                    });
+                }
+                effectivePrice = Number(variant.price);
+                variantSnapshot = {
+                    id: variant.id,
+                    size: variant.size,
+                    label: variant.label,
+                };
+            }
+
             if (Number(product.stock) < qty) {
                 return res.status(400).send({
                     message: `"${product.name}" এর স্টক অপর্যাপ্ত (মাত্র ${product.stock}টি আছে)`,
                 });
             }
 
-            // Price snapshot — server-এর DB থেকে
-            const price = Number(product.price);
-            const lineTotal = price * qty;
+            const lineTotal = effectivePrice * qty;
             subtotal += lineTotal;
 
             orderItems.push({
                 productId: product._id,
                 slug: product.slug,
                 name: product.name,
-                price,
+                variant: variantSnapshot,
+                price: effectivePrice,
                 qty,
                 lineTotal,
                 image: product.images?.[0] || null,
@@ -134,7 +161,7 @@ router.post("/", async (req, res) => {
                     fullAddress: String(
                         customer.address.fullAddress || ""
                     ).trim(),
-                    
+
                 },
             },
             items: orderItems,
